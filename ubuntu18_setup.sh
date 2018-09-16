@@ -11,10 +11,56 @@ sed -i -e  's/^.*\<ChallengeResponseAuthentication\>.*$/ChallengeResponseAuthent
 sed -i -e  's/^.*\<UsePAM\>.*$/UsePAM no/' /etc/ssh/sshd_config
 /etc/init.d/ssh restart
 
+# Postgres
+PG_VERSION=10
+wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
+sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt/ bionic-pgdg main" > /etc/apt/sources.list.d/pgdg_bionic.list'
+sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt/ xenial-pgdg main" > /etc/apt/sources.list.d/pgdg_xenial.list'
+apt update
+apt-get install postgresql-$PG_VERSION pwgen -y
+systemctl start postgresql.service
+systemctl enable postgresql.service
+pwgen -s 16 1 > .pg_passwd
+cat .pg_passwd
+passwd postgres
+sudo -i -u postgres psql -c 'CREATE EXTENSION "uuid-ossp";'
+apt-get install postgresql-$PG_VERSION-plv8 -y
+sudo -i -u postgres psql -c 'CREATE EXTENSION plv8;'
+
+echo 'hostssl all all 0.0.0.0/0 md5' >> `find /etc/postgresql -name pg_hba.conf`
+sed -i -e  "s/.*\<listen_addresses\>.*/listen_addresses='*'/" `find /etc/postgresql -name postgresql.conf`
+
+cat << EOT > pg_create_function_short_uid.plv8
+create or replace function short_uid() returns text as \$\$
+  const dic = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-'
+  var uid = ""
+  for (var i = 0; i < 23; i++) {
+    uid += dic[Math.floor(Math.random()*dic.length)]
+  }
+  return uid;
+\$\$ language plv8 immutable strict;
+EOT
+sudo -i -u postgres psql -f - < pg_create_function_short_uid.plv8
+
+cat << EOT > pg_create_table_jsondb.sql
+create table jsondb (
+  id   char(23) primary key default short_uid(),
+  type text  not null,
+  data jsonb not null,
+  created_at timestamptz not null default now()
+);
+EOT
+sudo -i -u postgres psql -f - < pg_create_table_jsondb.sql
+
+
+/etc/init.d/postgresql restart
+
+
 # ファイアウォール設定
 ufw allow 22
 ufw allow 80
 ufw allow 443
+ufw allow 5432
 ufw default deny
 ufw --force enable
 ufw status verbose
@@ -34,12 +80,14 @@ npm install yarn -g
 
 # 管理ユーザー作成
 ADMIN_USER=hirauchi
-AUTH_KEY_URL=https://github.com/hirauchi0713.keys
+AUTH_KEY_URL=https://raw.githubusercontent.com/hirauchi0713/server_setup.sh/master/authorized_keys
+SSH_DIR=/home/$ADMIN_USER/.ssh
+
 adduser --disabled-password --gecos "" $ADMIN_USER
 gpasswd -a $ADMIN_USER sudo
-mkdir /home/$ADMIN_USER/.ssh
-wget $AUTH_KEY_URL -O /home/$ADMIN_USER/.ssh/authorized_keys
-chown -R $ADMIN_USER:$ADMIN_USER /home/$ADMIN_USER/.ssh
-chmod 700 /home/$ADMIN_USER/.ssh
-chmod 600 /home/$ADMIN_USER/.ssh/authorized_keys
+mkdir $SSH_DIR
+wget $AUTH_KEY_URL -O $SSH_DIR/authorized_keys
+chown -R $ADMIN_USER:$ADMIN_USER $SSH_DIR
+chmod 700 $SSH_DIR
+chmod 600 $SSH_DIR/authorized_keys
 

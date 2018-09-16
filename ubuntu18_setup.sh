@@ -1,3 +1,3 @@
 #!/bin/bash
 
-apt-get upgrade -y
+apt-get --with-new-pkgs upgrade -y

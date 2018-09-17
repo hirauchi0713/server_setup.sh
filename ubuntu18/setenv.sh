@@ -4,6 +4,7 @@ cat << EOT >> .bashrc
 ############
 
 # ホスト名('_'は使えない。'-'なら可)
+export DOMAIN_NAME=sibuya.tokyo
 export NEW_HOST_NAME=template
 
 # SSH
